@@ -46,7 +46,8 @@ export AWS_AVAILABILITY_ZONES=us-west-2a,us-west-2b,us-west-2c
 export KOPS_STATE_STORE=s3://bucket-blablabla    #bucket名稱自取
 ```
 
-啟動Cluster
+## Start with kops
+### Create cluster
 --name (填入Route53建立的domain name， 如果有public就可以填入 也可以填local做private)\
 這裡以 ecv.k8s.local 為例\
 預設是1個master node 與2個worker nodes
