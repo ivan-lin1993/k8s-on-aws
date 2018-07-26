@@ -48,6 +48,7 @@ export KOPS_STATE_STORE=s3://bucket-blablabla    #bucket名稱自取
 
 ## Start with kops
 ### Create cluster
+#### Single master Cluster
 --name (填入Route53建立的domain name， 如果有public就可以填入 也可以填local做private)\
 這裡以 ecv.k8s.local 為例\
 預設是1個master node 與2個worker nodes
@@ -57,7 +58,7 @@ kops create cluster \
   --zones $AWS_AVAILABILITY_ZONES
 ```
 
-### Muti-Clusters Example
+#### Muti-Clusters Example
 ```
 kops create cluster \
   --name ecv.k8s.local \
@@ -103,7 +104,7 @@ spec:
   - us-west-2b
   - us-west-2c
 ```
-### (Optional)
+#### (Optional)
 如果要開Spot機型, 在spec底下多加一個參數 maxPrice
 ```
 spec:
@@ -111,7 +112,7 @@ spec:
 ```
 以max price開t2.medium的spot instances
 
-### 修改完後update
+#### 修改完後update
 ```
 kops update cluster ecv.k8s.local --yes
 ```
@@ -137,16 +138,17 @@ Note: 如果為muti-cluster, 所有的masters會座落在不同的AZ~
 
 ## Start with kubectl
 kubectl (cube control) 是 K8S 的 CLI, 掌管整個 K8S 的 config, 將指令透過 API 的方式打到 master node 上, 更改 config 來達成不同需求的部屬
-### cluster-info and version
+#### cluster-info and version
 ```
 kubectl cluster-info
 kubectl version
 ```
-### Display Nodes
+#### Display Nodes
 ```
 kubectl get nodes
 ```
-### Create Pod
+### Get into Pods~
+#### Create Pod
 ```
 A Pod is the smallest deployable unit that can be created, scheduled, and managed. It’s a logical collection of containers that belong to an application. Pods are created in a namespace. All containers in a pod share the namespace, volumes and networking stack. This allows containers in the pod to “find” each other and communicate using localhost.
 ```
@@ -154,21 +156,21 @@ A Pod is the smallest deployable unit that can be created, scheduled, and manage
 ```
 kubectl run nginx --image=nginx
 ```
-### List deployment 
+#### List deployment 
 ```
 $ kubectl get deployments
 
 NAME      DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
 nginx     1         1         1            1           41s
 ```
-### List running pods
+#### List running pods
 ```
 $ kubectl get pods
 NAME                   READY     STATUS    RESTARTS   AGE
 nginx-8586cf59-gmqc9   1/1       Running   0          3m
 ```
 
-### 看 pod 的詳細資訊
+#### 看 pod 的詳細資訊
 ```
 $ kubectl describe pod/nginx-8586cf59-gmqc9
 
@@ -209,20 +211,20 @@ kube-scheduler-ip-172-20-60-21.us-west-2.compute.internal            1/1       R
 
 ```
 
-### Log from the Pod
+#### Log from the Pod
 ```
 $ kubectl logs nginx-8586cf59-gmqc9 --namespace default
 ```
 (剛開的nginx不會有任何log)
 
-### Execute a shell on the running pod
+#### Execute a shell on the running pod
 
 This command will open a TTY to a shell in your pod:
 ```
 $ kubectl exec -it nginx-8586cf59-gmqc9 /bin/bash
 ```
 
-### (Optional) 試著把 Pod 刪除 
+#### (Optional) 試著把 Pod 刪除 
 ```
 $ kubectl delete pods/nginx-8586cf59-gmqc9
 
@@ -231,12 +233,12 @@ NAME                   READY     STATUS              RESTARTS   AGE
 nginx-8586cf59-gmqc9   0/1       Terminating         0          2m
 nginx-8586cf59-j7fqc   0/1       ContainerCreating   0          4s
 ```
-### Delete Deployment
+#### Delete Deployment
 ```
 $ kubectl delete deployment/nginx
 ```
 
-### Create another Pod using yaml file
+#### Create another Pod using yaml file
 
 ```
 $ cat pod.yaml
@@ -260,6 +262,7 @@ $ kubectl apply -f pod.yaml
 pod "nginx-pod" created
 ```
 
+
 ### 設定 Memory 與 CPU
 在 Pod 中以 _request_ ( memory/CPU 的最小值) 或 _limit_ ( 最大值 ) 來設定
 
@@ -273,4 +276,196 @@ pod "nginx-pod" created
 
 CPU can be requested in cpu units. 1 cpu unit is equivalent 1 AWS vCPU. It can also be requested in fractional units, such as 0.5 or in millicpu such as 500m.
 
+#### yaml 設定檔
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-pod2
+  labels:
+    name: nginx-pod
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+    resources:
+      limits:
+        memory: "200Mi"
+        cpu: 2
+      requests:
+        memory: "100Mi"
+        cpu: 1
+    ports:
+    - containerPort: 80
+```
+```
+$ kubectl apply -f {上面的檔名}
+```
 
+#### 查看運用的資源
+
+沒有在 yaml 中限制的 pod 可以在下面看出差別
+
+```
+$ kubectl get pod/nginx-pod -o jsonpath={.spec.containers[].resources}
+map[requests:map[cpu:100m]]
+# 預設限制 cpu 100m
+
+
+$ kubectl get pod/nginx-pod2 -o jsonpath={.spec.containers[].resources}
+map[limits:map[memory:200Mi cpu:2] requests:map[cpu:1 memory:100Mi]]
+# 可以看到改變
+```
+
+因為 nginx 運用到的資源極少, 設定的 limit 比較不會影響\
+要是 pod 的資源用量超出了限制範圍呢 ?
+
+```
+$ cat wild.yml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: wildfly-pod
+  labels:
+    name: wildfly-pod
+spec:
+  containers:
+  - name: wildfly
+    image: jboss/wildfly:11.0.0.Final
+    resources:
+      limits:
+        memory: "200Mi"
+        cpu: 2
+      requests:
+        memory: "100Mi"
+        cpu: 1
+    ports:
+    - containerPort: 8080
+```
+這裡使用wildfly這個image, 並限制其使用 200M memory
+```
+$ kubectl apply -f wild.yml
+
+$ kubectl get pods -w  # 用-w去watch
+
+NAME          READY     STATUS    RESTARTS   AGE
+wildfly-pod   0/1       ContainerCreating   0         12m
+wildfly-pod   1/1       Running   0         12m
+wildfly-pod   0/1       OOMKilled   0         12m
+wildfly-pod   1/1       Running   1         12m
+wildfly-pod   0/1       OOMKilled   1         12m
+wildfly-pod   0/1       CrashLoopBackOff   1         13m
+wildfly-pod   1/1       Running   2         13m
+wildfly-pod   0/1       OOMKilled   2         13m
+wildfly-pod   0/1       CrashLoopBackOff   2         13m
+
+看到不斷地被 OOMKilled 然後又被 K8S 重啟....
+OOMKilled 表示 container 運行時記憶體不足
+```
+
+```
+$ cat wild_fix.yml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: wildfly-pod
+  labels:
+    name: wildfly-pod
+spec:
+  containers:
+  - name: wildfly
+    image: jboss/wildfly:11.0.0.Final
+    resources:
+      limits:
+        memory: "300Mi"
+        cpu: 2
+      requests:
+        memory: "100Mi"
+        cpu: 1
+    ports:
+    - containerPort: 8080
+```
+
+#### Delete all pods
+```
+$ kubectl delete $(kubectl get pods -o=name)
+```
+
+## Deployment
+#### Create a Deployment
+```
+apiVersion: apps/v1
+kind: Deployment  # kubernetes object type
+metadata:
+  name: nginx-deployment  # deployment name
+spec:
+  replicas: 3  # number of replicas
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx # pod labels
+    spec:
+      containers:
+      - name: nginx # container name
+        image: nginx:1.12.1 # nginx image
+        imagePullPolicy: IfNotPresent # if exists, will not pull new image
+        ports: # container and host port assignments
+        - containerPort: 80
+        - containerPort: 443
+```
+檢查跑了甚麼
+```
+$ kubectl get deployments
+NAME               DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+nginx-deployment   3         3         3            3           25s
+
+
+$ kubectl get replicaset
+NAME                          DESIRED   CURRENT   READY     AGE
+nginx-deployment-7f786f684b   3         3         3         6m
+
+
+$ kubectl get pods
+NAME                                READY     STATUS    RESTARTS   AGE
+nginx-deployment-7f786f684b-cpzts   1/1       Running   0          6m
+nginx-deployment-7f786f684b-cqj4g   1/1       Running   0          6m
+nginx-deployment-7f786f684b-vrgm9   1/1       Running   0          6m
+```
+#### Scale Deployment
+Scale it
+```
+$ kubectl scale --replicas=5 deployment/nginx-deployment
+```
+```
+$ kubectl get pods
+NAME                                READY     STATUS    RESTARTS   AGE
+nginx-deployment-7f786f684b-cpzts   1/1       Running   0          11m
+nginx-deployment-7f786f684b-cqj4g   1/1       Running   0          11m
+nginx-deployment-7f786f684b-vrgm9   1/1       Running   0          11m
+nginx-deployment-7f786f684b-wspw4   1/1       Running   0          5s
+nginx-deployment-7f786f684b-z69cz   1/1       Running   0          5s
+```
+### Update deployment
+```
+$ kubectl edit deployment/nginx-deployment
+```
+To see what happened
+```
+$ kubectl describe deployments/nginx-deployment
+```
+
+### Rollback a Deployment
+弄錯了想收回\
+先檢查更改紀錄
+```
+$ kubectl rollout history deployment/nginx-deployment
+```
+rollback
+```
+$ kubectl rollout undo deployment/nginx-deployment
+```
